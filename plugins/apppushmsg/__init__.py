@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas.types import EventType, NotificationType
+from app.schemas.types import EventType
 from app.utils.http import RequestUtils
 
 
@@ -30,7 +30,6 @@ class AppPushMsg(_PluginBase):
 
     _enabled = False
     _token = None
-    _msgtypes = []
 
     _api_url = "http://106.14.89.6/api/push"
     _api_key = "pPfr3wS97oviEGT111"
@@ -39,7 +38,6 @@ class AppPushMsg(_PluginBase):
         if config:
             self._enabled = config.get("enabled", False)
             self._token = config.get("token")
-            self._msgtypes = config.get("msgtypes") or []
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
@@ -68,13 +66,6 @@ class AppPushMsg(_PluginBase):
         }
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
-        msg_type_options = []
-        for item in NotificationType:
-            msg_type_options.append({
-                "title": item.value,
-                "value": item.name
-            })
-
         return [
             {
                 "component": "VForm",
@@ -160,29 +151,6 @@ class AppPushMsg(_PluginBase):
                                 },
                                 "content": [
                                     {
-                                        "component": "VSelect",
-                                        "props": {
-                                            "multiple": True,
-                                            "chips": True,
-                                            "model": "msgtypes",
-                                            "label": "消息类型",
-                                            "items": msg_type_options
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {
-                                    "cols": 12
-                                },
-                                "content": [
-                                    {
                                         "component": "VAlert",
                                         "props": {
                                             "type": "info",
@@ -198,49 +166,11 @@ class AppPushMsg(_PluginBase):
             }
         ], {
             "enabled": False,
-            "token": "",
-            "msgtypes": []
+            "token": ""
         }
 
     def get_page(self) -> List[dict]:
-        return [
-            {
-                "component": "VCard",
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "App Push 测试"
-                    },
-                    {
-                        "component": "VCardText",
-                        "text": "请先在配置页保存 token，然后点击下方按钮发送一条测试消息。"
-                    },
-                    {
-                        "component": "VCardActions",
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "variant": "tonal",
-                                    "disabled": not bool(self._token)
-                                },
-                                "text": "发送测试消息",
-                                "events": {
-                                    "click": {
-                                        "api": "plugin/AppPushMsg/run",
-                                        "method": "get",
-                                        "params": {
-                                            "apikey": settings.API_TOKEN
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        pass
 
     @eventmanager.register(EventType.NoticeMessage)
     def send(self, event: Event):
@@ -250,11 +180,6 @@ class AppPushMsg(_PluginBase):
         msg_body = event.event_data
         channel = msg_body.get("channel")
         if channel:
-            return
-
-        msg_type: NotificationType = msg_body.get("type")
-        if msg_type and self._msgtypes and msg_type.name not in self._msgtypes:
-            logger.info(f"消息类型 {msg_type.value} 未开启消息发送")
             return
 
         title, content = self._build_message(msg_body)
