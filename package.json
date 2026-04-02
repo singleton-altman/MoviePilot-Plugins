@@ -850,11 +850,11 @@
     "v2": true
   },
   "AppPushMsg": {
-    "name": "App推送消息通知",
-    "description": "使用 App Push 接口发送消息通知，并提供测试按钮。",
+    "name": "APPLitePush",
+    "description": "使用 APPLitePush 接口发送消息通知，并提供测试按钮。",
     "labels": "消息通知",
     "version": "1.0",
-    "icon": "WxPusherMsg_A.png",
+    "icon": "Pushplus_A.png",
     "author": "Codex",
     "level": 1,
     "v2": true

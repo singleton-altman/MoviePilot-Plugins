@@ -10,11 +10,11 @@ from app.utils.http import RequestUtils
 
 class AppPushMsg(_PluginBase):
     # 插件名称
-    plugin_name = "App推送消息通知"
+    plugin_name = "APPLitePush"
     # 插件描述
-    plugin_desc = "支持使用 App Push 接口发送消息通知。"
+    plugin_desc = "支持使用 APPLitePush 接口发送消息通知。"
     # 插件图标
-    plugin_icon = "WxPusherMsg_A.png"
+    plugin_icon = "Pushplus_A.png"
     # 插件版本
     plugin_version = "1.0"
     # 插件作者
