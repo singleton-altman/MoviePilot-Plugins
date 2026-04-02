@@ -10,6 +10,8 @@ from app.utils.http import RequestUtils
 
 
 class AppPushMsg(_PluginBase):
+    DEFAULT_API_KEY = "mp_push_3f8d1c7a9b4e2f6c0a5d8e1b7c9f2a4d6e3b1c8f5a7d9e2"
+
     # 插件名称
     plugin_name = "APPLitePush"
     # 插件描述
@@ -17,7 +19,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -33,12 +35,15 @@ class AppPushMsg(_PluginBase):
     _token = None
 
     _api_url = "http://106.14.89.6/api/push"
-    _api_key = "pPfr3wS97oviEGT111"
+    _api_key = DEFAULT_API_KEY
 
     def init_plugin(self, config: dict = None):
         if config:
             self._enabled = config.get("enabled", False)
             self._token = config.get("token")
+            self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
+        else:
+            self._api_key = self.DEFAULT_API_KEY
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
@@ -150,6 +155,28 @@ class AppPushMsg(_PluginBase):
                             {
                                 "component": "VCol",
                                 "props": {
+                                    "cols": 12,
+                                    "md": 8
+                                },
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "apikey",
+                                            "label": "API Key",
+                                            "placeholder": "不填写则使用默认值"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {
                                     "cols": 12
                                 },
                                 "content": [
@@ -177,7 +204,8 @@ class AppPushMsg(_PluginBase):
             }
         ], {
             "enabled": False,
-            "token": ""
+            "token": "",
+            "apikey": self.DEFAULT_API_KEY
         }
 
     def get_page(self) -> List[dict]:
