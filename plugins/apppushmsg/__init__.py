@@ -1,4 +1,5 @@
 from typing import Any, List, Dict, Tuple
+from datetime import datetime
 
 from app.core.config import settings
 from app.core.event import eventmanager, Event
@@ -18,9 +19,9 @@ class AppPushMsg(_PluginBase):
     # 插件版本
     plugin_version = "1.0"
     # 插件作者
-    plugin_author = "Codex"
+    plugin_author = "altman"
     # 作者主页
-    author_url = "https://github.com/openai"
+    author_url = "https://github.com/singleton-altman"
     # 插件配置项ID前缀
     plugin_config_prefix = "apppushmsg_"
     # 加载顺序
@@ -60,12 +61,14 @@ class AppPushMsg(_PluginBase):
             title="测试消息",
             content="这是一条本地测试通知"
         )
+        self._save_test_result(success=success, message=message)
         return {
             "code": 0 if success else 500,
             "msg": message
         }
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        last_test_text = self._format_test_result()
         return [
             {
                 "component": "VForm",
@@ -157,6 +160,14 @@ class AppPushMsg(_PluginBase):
                                             "variant": "tonal",
                                             "text": "请先保存 token，再点击测试按钮。测试按钮会使用已保存的配置发送消息。"
                                         }
+                                    },
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "secondary",
+                                            "variant": "tonal",
+                                            "text": last_test_text
+                                        }
                                     }
                                 ]
                             }
@@ -170,7 +181,58 @@ class AppPushMsg(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        pass
+        test_result = self.get_data("last_test_result") or {}
+        success = test_result.get("success")
+        return [
+            {
+                "component": "VCard",
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "text": "测试消息"
+                    },
+                    {
+                        "component": "VCardText",
+                        "text": "点击按钮发送一条测试消息，发送结果会显示在下方。"
+                    },
+                    {
+                        "component": "VCardActions",
+                        "content": [
+                            {
+                                "component": "VBtn",
+                                "props": {
+                                    "color": "primary",
+                                    "variant": "tonal"
+                                },
+                                "text": "发送测试消息",
+                                "events": {
+                                    "click": {
+                                        "api": "plugin/AppPushMsg/run",
+                                        "method": "get",
+                                        "params": {
+                                            "apikey": settings.API_TOKEN
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "success" if success is True else "error" if success is False else "info",
+                                    "variant": "tonal",
+                                    "text": self._format_test_result()
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
 
     @eventmanager.register(EventType.NoticeMessage)
     def send(self, event: Event):
@@ -192,6 +254,7 @@ class AppPushMsg(_PluginBase):
             logger.info("App Push消息发送成功")
         else:
             logger.warn(f"App Push消息发送失败：{message}")
+        self._save_test_result(success=success, message=message)
 
     @staticmethod
     def _build_message(msg_body: Dict[str, Any]) -> Tuple[str, str]:
@@ -253,6 +316,23 @@ class AppPushMsg(_PluginBase):
         except Exception as err:
             logger.error(f"App Push消息发送失败：{err}")
             return False, str(err)
+
+    def _save_test_result(self, success: bool, message: str):
+        self.save_data("last_test_result", {
+            "success": success,
+            "message": message,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+    def _format_test_result(self) -> str:
+        test_result = self.get_data("last_test_result") or {}
+        if not test_result:
+            return "最近一次测试结果：暂无记录"
+
+        status = "成功" if test_result.get("success") else "失败"
+        message = test_result.get("message") or "无返回信息"
+        time = test_result.get("time") or "未知时间"
+        return f"最近一次测试结果：{status} | 时间：{time} | 返回：{message}"
 
     def stop_service(self):
         pass
