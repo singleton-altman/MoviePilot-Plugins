@@ -18,7 +18,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.3"
+    plugin_version = "1.1.4"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -144,16 +144,21 @@ class AppPushMsg(_PluginBase):
 
                                                 model.test_loading = true;
                                                 try {
-                                                    const response = await fetch('/api/v1/plugin/AppPushMsg/run', {
-                                                        method: 'GET',
-                                                        credentials: 'include'
-                                                    });
-                                                    const data = await response.json().catch(() => ({}));
-                                                    const success = response.ok && Number(data?.code ?? 500) === 0;
-                                                    const message = data?.msg || (success ? '消息发送成功' : `HTTP ${response.status}`);
+                                                    const api = window.MoviePilotAPI;
+                                                    if (!api) {
+                                                        throw new Error('未找到 MoviePilotAPI');
+                                                    }
+                                                    const data = await api.get('plugin/AppPushMsg/run');
+                                                    const success = Number(data?.code ?? 500) === 0;
+                                                    const message = data?.msg || (success ? '消息发送成功' : '操作失败');
                                                     formatResult(success, message);
                                                 } catch (error) {
-                                                    formatResult(false, error?.message || '请求失败，请稍后重试');
+                                                    const message =
+                                                        error?.response?.data?.msg ||
+                                                        error?.response?.data?.message ||
+                                                        error?.message ||
+                                                        '请求失败，请稍后重试';
+                                                    formatResult(false, message);
                                                 } finally {
                                                     model.test_loading = false;
                                                 }
