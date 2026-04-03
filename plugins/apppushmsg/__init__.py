@@ -19,7 +19,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "1.1.1"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -209,58 +209,7 @@ class AppPushMsg(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        test_result = self.get_data("last_test_result") or {}
-        success = test_result.get("success")
-        return [
-            {
-                "component": "VCard",
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "测试消息"
-                    },
-                    {
-                        "component": "VCardText",
-                        "text": "点击按钮发送一条测试消息，发送结果会显示在下方。"
-                    },
-                    {
-                        "component": "VCardActions",
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "variant": "tonal"
-                                },
-                                "text": "发送测试消息",
-                                "events": {
-                                    "click": {
-                                        "api": "plugin/AppPushMsg/run",
-                                        "method": "get",
-                                        "params": {
-                                            "apikey": settings.API_TOKEN
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "success" if success is True else "error" if success is False else "info",
-                                    "variant": "tonal",
-                                    "text": self._format_test_result()
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        return []
 
     @eventmanager.register(EventType.NoticeMessage)
     def send(self, event: Event):
@@ -286,8 +235,14 @@ class AppPushMsg(_PluginBase):
 
     @staticmethod
     def _build_message(msg_body: Dict[str, Any]) -> Tuple[str, str]:
-        title = str(msg_body.get("title") or "").strip()
-        content = str(msg_body.get("text") or msg_body.get("summary") or "").strip()
+        title = str(msg_body.get("title") or msg_body.get("subject") or "").strip()
+        content = str(
+            msg_body.get("text")
+            or msg_body.get("content")
+            or msg_body.get("summary")
+            or msg_body.get("message")
+            or ""
+        ).strip()
         image = str(msg_body.get("image") or "").strip()
 
         if image:
@@ -304,10 +259,17 @@ class AppPushMsg(_PluginBase):
         if not self._token:
             return False, "请先配置 token 并保存"
 
+        normalized_title = title or "MoviePilot 消息通知"
+        normalized_content = content or normalized_title or "MoviePilot 消息通知"
         payload = {
             "token": self._token,
-            "title": title or "MoviePilot 消息通知",
-            "content": content or title or "MoviePilot 消息通知"
+            "title": normalized_title,
+            "content": normalized_content,
+            "jpush": {
+                "title": normalized_title,
+                "content": normalized_content,
+                "msg_content": normalized_content
+            }
         }
 
         try:
