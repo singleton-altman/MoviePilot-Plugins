@@ -1,7 +1,6 @@
 from typing import Any, List, Dict, Tuple
 from datetime import datetime
 
-from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase
@@ -19,7 +18,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.1"
+    plugin_version = "1.1.2"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -132,18 +131,35 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "block": True,
                                             "color": "primary",
-                                            "variant": "tonal"
-                                        },
-                                        "text": "发送测试消息",
-                                        "events": {
-                                            "click": {
-                                                "api": "plugin/AppPushMsg/run",
-                                                "method": "get",
-                                                "params": {
-                                                    "apikey": settings.API_TOKEN
+                                            "variant": "tonal",
+                                            "loading": "test_loading",
+                                            "disabled": "test_loading",
+                                            "onClick": """async function () {
+                                                const formatResult = (success, message) => {
+                                                    const now = new Date();
+                                                    const pad = (value) => String(value).padStart(2, '0');
+                                                    const time = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                                                    model.last_test_text = `最近一次测试结果：${success ? '成功' : '失败'} | 时间：${time} | 返回：${message || '无返回信息'}`;
+                                                };
+
+                                                model.test_loading = true;
+                                                try {
+                                                    const response = await fetch('/api/v1/plugin/AppPushMsg/run', {
+                                                        method: 'GET',
+                                                        credentials: 'include'
+                                                    });
+                                                    const data = await response.json().catch(() => ({}));
+                                                    const success = response.ok && Number(data?.code ?? 500) === 0;
+                                                    const message = data?.msg || (success ? '消息发送成功' : `HTTP ${response.status}`);
+                                                    formatResult(success, message);
+                                                } catch (error) {
+                                                    formatResult(false, error?.message || '请求失败，请稍后重试');
+                                                } finally {
+                                                    model.test_loading = false;
                                                 }
-                                            }
-                                        }
+                                            }"""
+                                        },
+                                        "text": "发送测试消息"
                                     }
                                 ]
                             }
@@ -185,7 +201,7 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "type": "info",
                                             "variant": "tonal",
-                                            "text": "请先保存 token，再点击测试按钮。测试按钮会使用已保存的配置发送消息。"
+                                            "text": "请先保存 token 和 apikey，再点击测试按钮。测试按钮会使用已保存的配置发送消息。"
                                         }
                                     },
                                     {
@@ -193,7 +209,7 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "type": "secondary",
                                             "variant": "tonal",
-                                            "text": last_test_text
+                                            "text": "last_test_text"
                                         }
                                     }
                                 ]
@@ -205,7 +221,9 @@ class AppPushMsg(_PluginBase):
         ], {
             "enabled": False,
             "token": "",
-            "apikey": self.DEFAULT_API_KEY
+            "apikey": self.DEFAULT_API_KEY,
+            "last_test_text": last_test_text,
+            "test_loading": False
         }
 
     def get_page(self) -> List[dict]:
