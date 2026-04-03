@@ -18,7 +18,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.2"
+    plugin_version = "1.1.3"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -132,8 +132,8 @@ class AppPushMsg(_PluginBase):
                                             "block": True,
                                             "color": "primary",
                                             "variant": "tonal",
-                                            "loading": "test_loading",
-                                            "disabled": "test_loading",
+                                            "loading": "{{ !!model.test_loading }}",
+                                            "disabled": "{{ !!model.test_loading }}",
                                             "onClick": """async function () {
                                                 const formatResult = (success, message) => {
                                                     const now = new Date();
@@ -209,7 +209,7 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "type": "secondary",
                                             "variant": "tonal",
-                                            "text": "last_test_text"
+                                            "text": "{{ model.last_test_text || '最近一次测试结果：暂无记录' }}"
                                         }
                                     }
                                 ]
