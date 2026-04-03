@@ -1,6 +1,7 @@
 from typing import Any, List, Dict, Tuple
 from datetime import datetime
 
+from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase
@@ -18,7 +19,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.4"
+    plugin_version = "1.1.5"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -148,7 +149,11 @@ class AppPushMsg(_PluginBase):
                                                     if (!api) {
                                                         throw new Error('未找到 MoviePilotAPI');
                                                     }
-                                                    const data = await api.get('plugin/AppPushMsg/run');
+                                                    const data = await api.get('plugin/AppPushMsg/run', {
+                                                        params: {
+                                                            apikey: '%s'
+                                                        }
+                                                    });
                                                     const success = Number(data?.code ?? 500) === 0;
                                                     const message = data?.msg || (success ? '消息发送成功' : '操作失败');
                                                     formatResult(success, message);
@@ -162,7 +167,7 @@ class AppPushMsg(_PluginBase):
                                                 } finally {
                                                     model.test_loading = false;
                                                 }
-                                            }"""
+                                            }""" % settings.API_TOKEN
                                         },
                                         "text": "发送测试消息"
                                     }
@@ -206,7 +211,7 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "type": "info",
                                             "variant": "tonal",
-                                            "text": "请先保存 token 和 apikey，再点击测试按钮。测试按钮会使用已保存的配置发送消息。"
+                                            "text": "请先保存 token 和 apikey，再点击测试按钮。测试按钮会使用已保存的配置发送消息，并自动携带 MoviePilot 接口 apikey。"
                                         }
                                     },
                                     {
