@@ -11,6 +11,16 @@ from app.utils.http import RequestUtils
 
 class AppPushMsg(_PluginBase):
     DEFAULT_API_KEY = "mp_push_3f8d1c7a9b4e2f6c0a5d8e1b7c9f2a4d6e3b1c8f5a7d9e2"
+    MESSAGE_TYPE_OPTIONS = [
+        {"type": "资源下载", "action": "all"},
+        {"type": "整理入库", "action": "all"},
+        {"type": "订阅", "action": "all"},
+        {"type": "站点", "action": "admin"},
+        {"type": "媒体服务器", "action": "admin"},
+        {"type": "手动处理", "action": "admin"},
+        {"type": "插件", "action": "admin"},
+        {"type": "其它", "action": "admin"}
+    ]
 
     # 插件名称
     plugin_name = "APPLitePush"
@@ -19,7 +29,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.5"
+    plugin_version = "1.1.8"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -33,6 +43,7 @@ class AppPushMsg(_PluginBase):
 
     _enabled = False
     _token = None
+    _message_types = None
 
     _api_url = "http://106.14.89.6/api/push"
     _api_key = DEFAULT_API_KEY
@@ -42,8 +53,10 @@ class AppPushMsg(_PluginBase):
             self._enabled = config.get("enabled", False)
             self._token = config.get("token")
             self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
+            self._message_types = self._normalize_message_types(config.get("message_types"))
         else:
             self._api_key = self.DEFAULT_API_KEY
+            self._message_types = self._default_message_types()
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
@@ -93,6 +106,33 @@ class AppPushMsg(_PluginBase):
                                         "props": {
                                             "model": "enabled",
                                             "label": "启用插件"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 8
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "model": "message_types",
+                                            "label": "消息类型过滤",
+                                            "items": self._message_type_select_items(),
+                                            "multiple": True,
+                                            "chips": True,
+                                            "clearable": True,
+                                            "hint": "仅转发所选 type/mtype 的消息；未选择任何类型时不转发。默认选择全部类型。",
+                                            "persistentHint": True
                                         }
                                     }
                                 ]
@@ -232,12 +272,64 @@ class AppPushMsg(_PluginBase):
             "enabled": False,
             "token": "",
             "apikey": self.DEFAULT_API_KEY,
+            "message_types": self._default_message_types(),
             "last_test_text": last_test_text,
             "test_loading": False
         }
 
     def get_page(self) -> List[dict]:
-        return []
+        test_result = self.get_data("last_test_result") or {}
+        success = test_result.get("success")
+        return [
+            {
+                "component": "VCard",
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "text": "发送一条测试消息"
+                    },
+                    {
+                        "component": "VCardText",
+                        "text": "点击下方按钮发送一条测试消息，最近一次消息状态会显示在下方。"
+                    },
+                    {
+                        "component": "VCardActions",
+                        "content": [
+                            {
+                                "component": "VBtn",
+                                "props": {
+                                    "color": "primary",
+                                    "variant": "tonal"
+                                },
+                                "text": "发送测试消息",
+                                "events": {
+                                    "click": {
+                                        "api": "plugin/AppPushMsg/run",
+                                        "method": "get",
+                                        "params": {
+                                            "apikey": settings.API_TOKEN
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "success" if success is True else "error" if success is False else "info",
+                                    "variant": "tonal",
+                                    "text": self._format_test_result()
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
 
     @eventmanager.register(EventType.NoticeMessage)
     def send(self, event: Event):
@@ -247,6 +339,11 @@ class AppPushMsg(_PluginBase):
         msg_body = event.event_data
         channel = msg_body.get("channel")
         if channel:
+            return
+
+        if not self._is_message_type_allowed(msg_body):
+            msg_type = msg_body.get("type") or msg_body.get("mtype") or "未知类型"
+            logger.info(f"App Push消息已过滤，消息类型：{msg_type}")
             return
 
         title, content = self._build_message(msg_body)
@@ -283,12 +380,75 @@ class AppPushMsg(_PluginBase):
 
         return title, content
 
+    @classmethod
+    def _default_message_types(cls) -> List[str]:
+        return [item["type"] for item in cls.MESSAGE_TYPE_OPTIONS]
+
+    @classmethod
+    def _message_type_select_items(cls) -> List[Dict[str, str]]:
+        return [
+            {
+                "title": f"{item['type']}（{item['action']}）",
+                "value": item["type"]
+            }
+            for item in cls.MESSAGE_TYPE_OPTIONS
+        ]
+
+    @classmethod
+    def _normalize_message_types(cls, message_types: Any) -> List[str]:
+        if message_types is None or message_types == "":
+            return cls._default_message_types()
+
+        if isinstance(message_types, str):
+            values = message_types.split(",")
+        elif isinstance(message_types, list):
+            values = message_types
+        else:
+            values = [message_types]
+
+        normalized = []
+        for value in values:
+            if isinstance(value, dict):
+                value = value.get("type") or value.get("value") or value.get("title")
+            value = str(value or "").strip()
+            if value and value not in normalized:
+                normalized.append(value)
+
+        return normalized
+
+    def _is_message_type_allowed(self, msg_body: Dict[str, Any]) -> bool:
+        selected_types = self._normalize_message_types(self._message_types)
+        if not selected_types:
+            return False
+
+        message_types = [
+            str(value).strip()
+            for value in (msg_body.get("type"), msg_body.get("mtype"))
+            if value is not None and str(value).strip()
+        ]
+        if not message_types:
+            return set(self._default_message_types()).issubset(set(selected_types))
+
+        selected_type_set = set(selected_types)
+        return any(message_type in selected_type_set for message_type in message_types)
+
+    @staticmethod
+    def _build_display_content(title: str, content: str) -> str:
+        normalized_title = str(title or "").strip()
+        normalized_content = str(content or "").strip()
+
+        if normalized_title and normalized_content and normalized_title != normalized_content:
+            return f"{normalized_title}\n\n{normalized_content}"
+
+        return normalized_content or normalized_title or "MoviePilot 消息通知"
+
     def _send_message(self, title: str, content: str) -> Tuple[bool, str]:
         if not self._token:
             return False, "请先配置 token 并保存"
 
         normalized_title = title or "MoviePilot 消息通知"
         normalized_content = content or normalized_title or "MoviePilot 消息通知"
+        display_content = self._build_display_content(normalized_title, normalized_content)
         payload = {
             "token": self._token,
             "title": normalized_title,
@@ -296,7 +456,7 @@ class AppPushMsg(_PluginBase):
             "jpush": {
                 "title": normalized_title,
                 "content": normalized_content,
-                "msg_content": normalized_content
+                "msg_content": display_content
             }
         }
 
