@@ -8,6 +8,7 @@
     "author": "altman",
     "level": 1,
     "v2": true,
+    "v3": false,
     "history": {
       "v1.0": "初始发布，支持 token 保存、测试推送与通知转发。",
       "v1.1": "新增 apikey 配置项，支持默认值回退。",
