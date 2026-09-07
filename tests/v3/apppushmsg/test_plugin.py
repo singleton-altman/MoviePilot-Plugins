@@ -8,7 +8,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 MessageType = Enum('MessageType', dict(Download='资源下载', Organize='整理入库',
     Subscribe='订阅', SiteMessage='站点', MediaServer='媒体服务器',
     Manual='手动处理', Plugin='插件', Agent='智能体', Other='其它'))
