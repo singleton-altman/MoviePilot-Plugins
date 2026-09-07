@@ -1,26 +1,29 @@
 from typing import Any, List, Dict, Tuple
 from datetime import datetime
 
-from app.core.config import settings
-from app.core.event import eventmanager, Event
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.events import eventmanager, Event
+from app.sdk.logging import logger
 from app.plugins import _PluginBase
 from app.schemas.types import EventType
-from app.utils.http import RequestUtils
+try:
+    from app.schemas.types import MessageType as NotificationType
+except ImportError:
+    # 兼容参考 WPUSH 所使用的早期 v3 类型名称。
+    from app.schemas.types import NotificationType
+from app.sdk.network import RequestUtils
 
 
 class AppPushMsg(_PluginBase):
     DEFAULT_API_KEY = "mp_push_3f8d1c7a9b4e2f6c0a5d8e1b7c9f2a4d6e3b1c8f5a7d9e2"
-    MESSAGE_TYPE_OPTIONS = [
-        {"type": "资源下载", "action": "all"},
-        {"type": "整理入库", "action": "all"},
-        {"type": "订阅", "action": "all"},
-        {"type": "站点", "action": "admin"},
-        {"type": "媒体服务器", "action": "admin"},
-        {"type": "手动处理", "action": "admin"},
-        {"type": "插件", "action": "admin"},
-        {"type": "其它", "action": "admin"}
-    ]
+    # 兼容旧版配置中的缩写标签。
+    LEGACY_TYPE_NAMES = {
+        "站点": "SiteMessage",
+        "媒体服务器": "MediaServer",
+        "手动处理": "Manual",
+        "插件": "Plugin",
+        "其它": "Other",
+    }
 
     # 插件名称
     plugin_name = "APPLitePush"
@@ -29,7 +32,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.8"
+    plugin_version = "3.0.0"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -49,21 +52,18 @@ class AppPushMsg(_PluginBase):
     _api_key = DEFAULT_API_KEY
 
     def init_plugin(self, config: dict = None):
-        if config:
-            self._enabled = config.get("enabled", False)
-            self._token = config.get("token")
-            self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
-            self._message_types = self._normalize_message_types(config.get("message_types"))
-        else:
-            self._api_key = self.DEFAULT_API_KEY
-            self._message_types = self._default_message_types()
+        config = config or {}
+        self._enabled = bool(config.get("enabled", False))
+        self._token = config.get("token")
+        self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
+        self._message_types = self._normalize_message_types(config.get("message_types"))
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
-        pass
+        return []
 
     def get_api(self) -> List[Dict[str, Any]]:
         return [{
@@ -131,7 +131,7 @@ class AppPushMsg(_PluginBase):
                                             "multiple": True,
                                             "chips": True,
                                             "clearable": True,
-                                            "hint": "仅转发所选 type/mtype 的消息；未选择任何类型时不转发。默认选择全部类型。",
+                                            "hint": "默认全选，接收全部消息（包括未知类型）；选择部分类型时仅接收所选类型；清空后不自动推送。测试推送不受影响。",
                                             "persistentHint": True
                                         }
                                     }
@@ -382,55 +382,52 @@ class AppPushMsg(_PluginBase):
 
     @classmethod
     def _default_message_types(cls) -> List[str]:
-        return [item["type"] for item in cls.MESSAGE_TYPE_OPTIONS]
+        return [item.value for item in NotificationType]
 
     @classmethod
     def _message_type_select_items(cls) -> List[Dict[str, str]]:
-        return [
-            {
-                "title": f"{item['type']}（{item['action']}）",
-                "value": item["type"]
-            }
-            for item in cls.MESSAGE_TYPE_OPTIONS
-        ]
+        # 保留中文配置值，使旧版本保存的选择可以直接在表单显示。
+        return [{"title": item.value, "value": item.value} for item in NotificationType]
+
+    @classmethod
+    def _normalize_message_type(cls, value: Any) -> str:
+        if isinstance(value, dict):
+            value = value.get("type") or value.get("value") or value.get("title")
+        if isinstance(value, NotificationType):
+            return value.value
+        value = str(value or "").strip()
+        name = value.removeprefix("NotificationType.").removeprefix("MessageType.")
+        name = cls.LEGACY_TYPE_NAMES.get(name, name)
+        member = NotificationType.__members__.get(name)
+        return member.value if member else value
 
     @classmethod
     def _normalize_message_types(cls, message_types: Any) -> List[str]:
         if message_types is None or message_types == "":
             return cls._default_message_types()
-
         if isinstance(message_types, str):
             values = message_types.split(",")
         elif isinstance(message_types, list):
             values = message_types
         else:
             values = [message_types]
-
         normalized = []
         for value in values:
-            if isinstance(value, dict):
-                value = value.get("type") or value.get("value") or value.get("title")
-            value = str(value or "").strip()
+            value = cls._normalize_message_type(value)
             if value and value not in normalized:
                 normalized.append(value)
-
         return normalized
 
     def _is_message_type_allowed(self, msg_body: Dict[str, Any]) -> bool:
-        selected_types = self._normalize_message_types(self._message_types)
+        selected_types = set(self._normalize_message_types(self._message_types))
         if not selected_types:
             return False
-
-        message_types = [
-            str(value).strip()
-            for value in (msg_body.get("type"), msg_body.get("mtype"))
-            if value is not None and str(value).strip()
-        ]
-        if not message_types:
-            return set(self._default_message_types()).issubset(set(selected_types))
-
-        selected_type_set = set(selected_types)
-        return any(message_type in selected_type_set for message_type in message_types)
+        # 全选是真正的全部推送，未知或缺失类型也不丢弃。
+        if set(self._default_message_types()).issubset(selected_types):
+            return True
+        # 与宿主一致，优先 type；仅缺失时回退 mtype。
+        message_type = msg_body.get("type") or msg_body.get("mtype")
+        return bool(message_type) and self._normalize_message_type(message_type) in selected_types
 
     @staticmethod
     def _build_display_content(title: str, content: str) -> str:
