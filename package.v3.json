@@ -1,0 +1,15 @@
+{
+  "AppPushMsg": {
+    "name": "APPLitePush",
+    "description": "使用 APPLitePush 推送消息，支持按消息类型选择接收，默认全部推送。",
+    "labels": "消息通知",
+    "version": "3.0.0",
+    "icon": "Pushplus_A.png",
+    "author": "altman",
+    "level": 1,
+    "history": {
+      "v3.0.0": "适配 MoviePilot v3 SDK，动态消息类型筛选，兼容旧版选择，默认全部推送。"
+    },
+    "system_version": ">=3.0.0"
+  }
+}
