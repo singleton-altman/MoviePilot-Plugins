@@ -1,22 +1,34 @@
-from typing import Any, List, Dict, Tuple
-from datetime import datetime
+"""APPLitePush 通知渠道插件。
 
-from app.sdk.config import settings
-from app.sdk.events import eventmanager, Event
+把 MoviePilot 的 NoticeMessage 转发到 APPLitePush 中继服务，再由中继服务投递到
+极光推送。支持按消息类型筛选，默认全量转发。
+"""
+
+import ipaddress
+from datetime import datetime
+from typing import Any
+from urllib.parse import urlsplit
+
+from app import schemas
+from app.sdk.events import Event, eventmanager
 from app.sdk.logging import logger
-from app.plugins import _PluginBase
+from app.sdk.network import RequestUtils
+from app.sdk.plugin import _PluginBase
 from app.schemas.types import EventType
+
 try:
     from app.schemas.types import MessageType as NotificationType
 except ImportError:
-    # 兼容参考 WPUSH 所使用的早期 v3 类型名称。
+    # 早期 v3 宿主只提供 NotificationType；两条路径都是字面量导入，不做动态拼接。
     from app.schemas.types import NotificationType
-from app.sdk.network import RequestUtils
 
 
 class AppPushMsg(_PluginBase):
+    """把通知转发到 APPLitePush 中继服务的消息渠道插件。"""
+
+    # 公开的默认 Key：服务端轮换 PUSH_API_KEY 即可一次性让所有沿用默认值的客户端失效。
     DEFAULT_API_KEY = "mp_push_3f8d1c7a9b4e2f6c0a5d8e1b7c9f2a4d6e3b1c8f5a7d9e2"
-    # 兼容旧版配置中的缩写标签。
+    # 兼容旧版配置中的英文枚举名。
     LEGACY_TYPE_NAMES = {
         "站点": "SiteMessage",
         "媒体服务器": "MediaServer",
@@ -32,7 +44,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -51,41 +63,49 @@ class AppPushMsg(_PluginBase):
     _api_url = "http://106.14.89.6/api/push"
     _api_key = DEFAULT_API_KEY
 
-    def init_plugin(self, config: dict = None):
+    def init_plugin(self, config: dict | None = None) -> None:
+        """读取配置并重建本次运行状态；重复调用结果一致。"""
         config = config or {}
         self._enabled = bool(config.get("enabled", False))
         self._token = config.get("token")
         self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
-        self._message_types = self._normalize_message_types(config.get("message_types"))
+        self._message_types = self._normalize_message_types(
+            config.get("message_types")
+        )
 
     def get_state(self) -> bool:
+        """返回插件是否处于可转发状态。"""
         return bool(self._enabled and self._token)
 
     @staticmethod
-    def get_command() -> List[Dict[str, Any]]:
+    def get_command() -> list[dict[str, Any]]:
+        """当前插件不注册远程命令。"""
         return []
 
-    def get_api(self) -> List[Dict[str, Any]]:
-        return [{
-            "path": "/run",
-            "endpoint": self.run_once,
-            "methods": ["GET"],
-            "summary": "发送测试消息",
-            "description": "发送一条本地测试通知"
-        }]
+    def get_api(self) -> list[dict[str, Any]]:
+        """注册发送测试消息的接口；插件页面通过登录态调用。"""
+        return [
+            {
+                "path": "/run",
+                "endpoint": self.run_once,
+                "methods": ["GET"],
+                "auth": "bear",
+                "response_model": schemas.Response[Any],
+                "summary": "发送测试消息",
+                "description": "使用已保存的配置发送一条本地测试通知",
+            }
+        ]
 
-    def run_once(self) -> Dict[str, Any]:
+    def run_once(self) -> schemas.Response:
+        """发送一条测试消息，并把结果写入最近一次推送记录。"""
         success, message = self._send_message(
-            title="测试消息",
-            content="这是一条本地测试通知"
+            title="测试消息", content="这是一条本地测试通知"
         )
         self._save_test_result(success=success, message=message)
-        return {
-            "code": 0 if success else 500,
-            "msg": message
-        }
+        return schemas.Response(success=success, message=message)
 
-    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+    def get_form(self) -> tuple[list[dict], dict[str, Any]]:
+        """返回配置页面与默认配置模型。"""
         last_test_text = self._format_test_result()
         return [
             {
@@ -96,31 +116,25 @@ class AppPushMsg(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 6
-                                },
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "enabled",
-                                            "label": "启用插件"
-                                        }
+                                            "label": "启用插件",
+                                        },
                                     }
-                                ]
+                                ],
                             }
-                        ]
+                        ],
                     },
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 8
-                                },
+                                "props": {"cols": 12, "md": 8},
                                 "content": [
                                     {
                                         "component": "VSelect",
@@ -132,39 +146,36 @@ class AppPushMsg(_PluginBase):
                                             "chips": True,
                                             "clearable": True,
                                             "hint": "默认全选，接收全部消息（包括未知类型）；选择部分类型时仅接收所选类型；清空后不自动推送。测试推送不受影响。",
-                                            "persistentHint": True
-                                        }
+                                            "persistentHint": True,
+                                        },
                                     }
-                                ]
+                                ],
                             }
-                        ]
+                        ],
                     },
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 8
-                                },
+                                "props": {"cols": 12, "md": 8},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "token",
                                             "label": "App Push Token",
-                                            "placeholder": "请输入推送 token"
-                                        }
+                                            "placeholder": "请输入推送 token",
+                                        },
                                     }
-                                ]
+                                ],
                             },
                             {
                                 "component": "VCol",
                                 "props": {
                                     "cols": 12,
                                     "md": 4,
-                                    "class": "d-flex align-end"
+                                    "class": "d-flex align-end",
                                 },
                                 "content": [
                                     {
@@ -180,7 +191,7 @@ class AppPushMsg(_PluginBase):
                                                     const now = new Date();
                                                     const pad = (value) => String(value).padStart(2, '0');
                                                     const time = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-                                                    model.last_test_text = `最近一次测试结果：${success ? '成功' : '失败'} | 时间：${time} | 返回：${message || '无返回信息'}`;
+                                                    model.last_test_text = `最近一次推送结果：${success ? '成功' : '失败'} | 时间：${time} | 返回：${message || '无返回信息'}`;
                                                 };
 
                                                 model.test_loading = true;
@@ -189,83 +200,74 @@ class AppPushMsg(_PluginBase):
                                                     if (!api) {
                                                         throw new Error('未找到 MoviePilotAPI');
                                                     }
-                                                    const data = await api.get('plugin/AppPushMsg/run', {
-                                                        params: {
-                                                            apikey: '%s'
-                                                        }
-                                                    });
-                                                    const success = Number(data?.code ?? 500) === 0;
-                                                    const message = data?.msg || (success ? '消息发送成功' : '操作失败');
+                                                    const data = await api.get('plugin/AppPushMsg/run');
+                                                    const success = data?.success === true;
+                                                    const message = data?.message || (success ? '消息发送成功' : '操作失败');
                                                     formatResult(success, message);
                                                 } catch (error) {
                                                     const message =
-                                                        error?.response?.data?.msg ||
                                                         error?.response?.data?.message ||
+                                                        error?.response?.data?.msg ||
                                                         error?.message ||
                                                         '请求失败，请稍后重试';
                                                     formatResult(false, message);
                                                 } finally {
                                                     model.test_loading = false;
                                                 }
-                                            }""" % settings.API_TOKEN
+                                            }""",
                                         },
-                                        "text": "发送测试消息"
+                                        "text": "发送测试消息",
                                     }
-                                ]
-                            }
-                        ]
+                                ],
+                            },
+                        ],
                     },
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 8
-                                },
+                                "props": {"cols": 12, "md": 8},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "apikey",
                                             "label": "API Key",
-                                            "placeholder": "不填写则使用默认值"
-                                        }
+                                            "placeholder": "不填写则使用默认值",
+                                        },
                                     }
-                                ]
+                                ],
                             }
-                        ]
+                        ],
                     },
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {
-                                    "cols": 12
-                                },
+                                "props": {"cols": 12},
                                 "content": [
                                     {
                                         "component": "VAlert",
                                         "props": {
                                             "type": "info",
                                             "variant": "tonal",
-                                            "text": "请先保存 token 和 apikey，再点击测试按钮。测试按钮会使用已保存的配置发送消息，并自动携带 MoviePilot 接口 apikey。"
-                                        }
+                                            "text": "请先保存 token 和 apikey，再点击测试按钮。测试按钮会使用已保存的配置发送消息。",
+                                        },
                                     },
                                     {
                                         "component": "VAlert",
                                         "props": {
                                             "type": "secondary",
                                             "variant": "tonal",
-                                            "text": "{{ model.last_test_text || '最近一次测试结果：暂无记录' }}"
-                                        }
-                                    }
-                                ]
+                                            "text": "{{ model.last_test_text || '最近一次推送结果：暂无记录' }}",
+                                        },
+                                    },
+                                ],
                             }
-                        ]
-                    }
+                        ],
+                    },
                 ]
             }
         ], {
@@ -274,45 +276,37 @@ class AppPushMsg(_PluginBase):
             "apikey": self.DEFAULT_API_KEY,
             "message_types": self._default_message_types(),
             "last_test_text": last_test_text,
-            "test_loading": False
+            "test_loading": False,
         }
 
-    def get_page(self) -> List[dict]:
+    def get_page(self) -> list[dict]:
+        """返回详情页：发送测试消息并展示最近一次结果。"""
         test_result = self.get_data("last_test_result") or {}
         success = test_result.get("success")
         return [
             {
                 "component": "VCard",
                 "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "发送一条测试消息"
-                    },
+                    {"component": "VCardTitle", "text": "发送一条测试消息"},
                     {
                         "component": "VCardText",
-                        "text": "点击下方按钮发送一条测试消息，最近一次消息状态会显示在下方。"
+                        "text": "点击下方按钮发送一条测试消息，最近一次消息状态会显示在下方。",
                     },
                     {
                         "component": "VCardActions",
                         "content": [
                             {
                                 "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "variant": "tonal"
-                                },
+                                "props": {"color": "primary", "variant": "tonal"},
                                 "text": "发送测试消息",
                                 "events": {
                                     "click": {
                                         "api": "plugin/AppPushMsg/run",
                                         "method": "get",
-                                        "params": {
-                                            "apikey": settings.API_TOKEN
-                                        }
                                     }
-                                }
+                                },
                             }
-                        ]
+                        ],
                     },
                     {
                         "component": "VCardText",
@@ -320,25 +314,29 @@ class AppPushMsg(_PluginBase):
                             {
                                 "component": "VAlert",
                                 "props": {
-                                    "type": "success" if success is True else "error" if success is False else "info",
+                                    "type": "success"
+                                    if success is True
+                                    else "error"
+                                    if success is False
+                                    else "info",
                                     "variant": "tonal",
-                                    "text": self._format_test_result()
-                                }
+                                    "text": self._format_test_result(),
+                                },
                             }
-                        ]
-                    }
+                        ],
+                    },
                 ]
             }
         ]
 
     @eventmanager.register(EventType.NoticeMessage)
-    def send(self, event: Event):
+    def send(self, event: Event) -> None:
+        """接收宿主通知事件，按配置筛选后转发到 APPLitePush。"""
         if not self.get_state() or not event.event_data:
             return
 
         msg_body = event.event_data
-        channel = msg_body.get("channel")
-        if channel:
+        if msg_body.get("channel"):
             return
 
         if not self._is_message_type_allowed(msg_body):
@@ -348,18 +346,19 @@ class AppPushMsg(_PluginBase):
 
         title, content = self._build_message(msg_body)
         if not title and not content:
-            logger.warn("标题和内容不能同时为空")
+            logger.warning("标题和内容不能同时为空")
             return
 
         success, message = self._send_message(title=title, content=content)
         if success:
             logger.info("App Push消息发送成功")
         else:
-            logger.warn(f"App Push消息发送失败：{message}")
+            logger.warning(f"App Push消息发送失败：{message}")
         self._save_test_result(success=success, message=message)
 
     @staticmethod
-    def _build_message(msg_body: Dict[str, Any]) -> Tuple[str, str]:
+    def _build_message(msg_body: dict[str, Any]) -> tuple[str, str]:
+        """从事件载荷提取标题和正文，并补齐缺失的一侧。"""
         title = str(msg_body.get("title") or msg_body.get("subject") or "").strip()
         content = str(
             msg_body.get("text")
@@ -381,16 +380,18 @@ class AppPushMsg(_PluginBase):
         return title, content
 
     @classmethod
-    def _default_message_types(cls) -> List[str]:
+    def _default_message_types(cls) -> list[str]:
+        """返回宿主声明的全部消息类型。"""
         return [item.value for item in NotificationType]
 
     @classmethod
-    def _message_type_select_items(cls) -> List[Dict[str, str]]:
-        # 保留中文配置值，使旧版本保存的选择可以直接在表单显示。
+    def _message_type_select_items(cls) -> list[dict[str, str]]:
+        """返回下拉选项；配置值保持中文字面量，旧配置可直接回显。"""
         return [{"title": item.value, "value": item.value} for item in NotificationType]
 
     @classmethod
     def _normalize_message_type(cls, value: Any) -> str:
+        """把枚举、英文名或中文标签统一成宿主使用的类型字面量。"""
         if isinstance(value, dict):
             value = value.get("type") or value.get("value") or value.get("title")
         if isinstance(value, NotificationType):
@@ -402,7 +403,8 @@ class AppPushMsg(_PluginBase):
         return member.value if member else value
 
     @classmethod
-    def _normalize_message_types(cls, message_types: Any) -> List[str]:
+    def _normalize_message_types(cls, message_types: Any) -> list[str]:
+        """把配置里的多选值规范化为去重后的类型字面量列表。"""
         if message_types is None or message_types == "":
             return cls._default_message_types()
         if isinstance(message_types, str):
@@ -418,7 +420,8 @@ class AppPushMsg(_PluginBase):
                 normalized.append(value)
         return normalized
 
-    def _is_message_type_allowed(self, msg_body: Dict[str, Any]) -> bool:
+    def _is_message_type_allowed(self, msg_body: dict[str, Any]) -> bool:
+        """判断消息类型是否落在已选范围内。"""
         selected_types = set(self._normalize_message_types(self._message_types))
         if not selected_types:
             return False
@@ -427,25 +430,69 @@ class AppPushMsg(_PluginBase):
             return True
         # 与宿主一致，优先 type；仅缺失时回退 mtype。
         message_type = msg_body.get("type") or msg_body.get("mtype")
-        return bool(message_type) and self._normalize_message_type(message_type) in selected_types
+        return (
+            bool(message_type)
+            and self._normalize_message_type(message_type) in selected_types
+        )
 
     @staticmethod
     def _build_display_content(title: str, content: str) -> str:
+        """合并标题与正文，避免两者重复展示。"""
         normalized_title = str(title or "").strip()
         normalized_content = str(content or "").strip()
 
-        if normalized_title and normalized_content and normalized_title != normalized_content:
+        if (
+            normalized_title
+            and normalized_content
+            and normalized_title != normalized_content
+        ):
             return f"{normalized_title}\n\n{normalized_content}"
 
         return normalized_content or normalized_title or "MoviePilot 消息通知"
 
-    def _send_message(self, title: str, content: str) -> Tuple[bool, str]:
+    @staticmethod
+    def _validate_push_url(url: str) -> str:
+        """校验推送地址：仅允许 http/https，且不得指向本机或内网保留地址。"""
+        parsed = urlsplit(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("推送地址必须使用 http 或 https")
+        host = (parsed.hostname or "").strip()
+        if not host:
+            raise ValueError("推送地址缺少主机名")
+        lowered = host.lower()
+        if lowered == "localhost" or lowered.endswith(".localhost"):
+            raise ValueError("推送地址不允许指向本机")
+        try:
+            ip = ipaddress.ip_address(lowered)
+        except ValueError:
+            return url
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_reserved
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("推送地址不允许指向内网或保留地址")
+        return url
+
+    def _send_message(self, title: str, content: str) -> tuple[bool, str]:
+        """向 APPLitePush 中继服务发送一条消息并归一化返回结果。"""
         if not self._token:
             return False, "请先配置 token 并保存"
 
+        try:
+            self._validate_push_url(self._api_url)
+        except ValueError as err:
+            logger.error(f"App Push推送地址不合法：{err}")
+            return False, str(err)
+
         normalized_title = title or "MoviePilot 消息通知"
         normalized_content = content or normalized_title or "MoviePilot 消息通知"
-        display_content = self._build_display_content(normalized_title, normalized_content)
+        display_content = self._build_display_content(
+            normalized_title, normalized_content
+        )
         payload = {
             "token": self._token,
             "title": normalized_title,
@@ -453,14 +500,14 @@ class AppPushMsg(_PluginBase):
             "jpush": {
                 "title": normalized_title,
                 "content": normalized_content,
-                "msg_content": display_content
-            }
+                "msg_content": display_content,
+            },
         }
 
         try:
             res = RequestUtils(
                 content_type="application/json",
-                headers={"X-API-Key": self._api_key}
+                headers={"X-API-Key": self._api_key},
             ).post_res(self._api_url, json=payload)
 
             if res is None:
@@ -475,7 +522,9 @@ class AppPushMsg(_PluginBase):
                 if isinstance(ret_json, dict):
                     code = ret_json.get("code")
                     success = ret_json.get("success")
-                    message = ret_json.get("message") or ret_json.get("msg") or "消息发送成功"
+                    message = (
+                        ret_json.get("message") or ret_json.get("msg") or "消息发送成功"
+                    )
 
                     if success is False:
                         return False, str(message)
@@ -492,22 +541,28 @@ class AppPushMsg(_PluginBase):
             logger.error(f"App Push消息发送失败：{err}")
             return False, str(err)
 
-    def _save_test_result(self, success: bool, message: str):
-        self.save_data("last_test_result", {
-            "success": success,
-            "message": message,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+    def _save_test_result(self, success: bool, message: str) -> None:
+        """保存最近一次推送结果，供详情页展示。"""
+        self.save_data(
+            "last_test_result",
+            {
+                "success": success,
+                "message": message,
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
 
     def _format_test_result(self) -> str:
+        """把最近一次推送结果格式化为页面文案。"""
         test_result = self.get_data("last_test_result") or {}
         if not test_result:
-            return "最近一次测试结果：暂无记录"
+            return "最近一次推送结果：暂无记录"
 
         status = "成功" if test_result.get("success") else "失败"
         message = test_result.get("message") or "无返回信息"
         time = test_result.get("time") or "未知时间"
-        return f"最近一次测试结果：{status} | 时间：{time} | 返回：{message}"
+        return f"最近一次推送结果：{status} | 时间：{time} | 返回：{message}"
 
-    def stop_service(self):
-        pass
+    def stop_service(self) -> None:
+        """释放插件状态；本插件不持有后台线程或网络客户端。"""
+        self._enabled = False

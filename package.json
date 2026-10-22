@@ -3,7 +3,7 @@
     "name": "APPLitePush",
     "description": "使用 APPLitePush 接口发送消息通知，并提供测试按钮。",
     "labels": "消息通知",
-    "version": "1.1.8",
+    "version": "1.1.9",
     "icon": "Pushplus_A.png",
     "author": "altman",
     "level": 1,
@@ -19,7 +19,8 @@
       "v1.1.5": "修复 form 测试按钮调用 MoviePilot 自身接口时缺少 apikey 参数的问题。",
       "v1.1.6": "恢复 page 测试消息页面，展示发送测试消息入口和最近消息状态组件。",
       "v1.1.7": "优化推送显示内容，保持 title 和 content 同时参与消息展示。",
-      "v1.1.8": "新增消息类型过滤配置，仅转发所选 type/mtype 的消息，默认全部转发。"
+      "v1.1.8": "新增消息类型过滤配置，仅转发所选 type/mtype 的消息，默认全部转发。",
+      "v1.1.9": "消息类型清单补齐「智能体」，与宿主 NotificationType 保持一致。"
     }
   }
 }

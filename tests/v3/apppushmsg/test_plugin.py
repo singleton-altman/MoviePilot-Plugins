@@ -1,4 +1,4 @@
-"""隔离宿主和网络，验证通知筛选与配置契约。"""
+"""隔离宿主和网络，验证通知筛选、配置契约与推送地址校验。"""
 import importlib.util
 import json
 from enum import Enum
@@ -17,16 +17,30 @@ MessageType = Enum('MessageType', dict(Download='资源下载', Organize='整理
 def load_plugin(legacy=False):
     modules = {name: ModuleType(name) for name in (
         'app', 'app.sdk', 'app.sdk.config', 'app.sdk.events', 'app.sdk.logging',
-        'app.sdk.network', 'app.plugins', 'app.schemas', 'app.schemas.types')}
+        'app.sdk.network', 'app.sdk.plugin', 'app.plugins', 'app.schemas',
+        'app.schemas.types', 'app.schemas.response')}
     modules['app.sdk.config'].settings = SimpleNamespace(API_TOKEN='test-only')
     modules['app.sdk.events'].Event = SimpleNamespace
     modules['app.sdk.events'].eventmanager = SimpleNamespace(register=lambda _: lambda fn: fn)
     modules['app.sdk.logging'].logger = Mock()
     modules['app.sdk.network'].RequestUtils = Mock(side_effect=AssertionError('Real network forbidden'))
+    modules['app.sdk.plugin']._PluginBase = object
     modules['app.plugins']._PluginBase = object
     types = modules['app.schemas.types']
     types.EventType = SimpleNamespace(NoticeMessage='notice.message')
     setattr(types, 'NotificationType' if legacy else 'MessageType', MessageType)
+
+    class Response:
+        """模拟宿主统一响应结构，只保留测试关心的字段。"""
+
+        def __init__(self, success=False, message='', data=None):
+            self.success = success
+            self.message = message
+            self.data = data
+
+    modules['app.schemas'].Response = Response
+    modules['app.schemas.response'].Response = Response
+
     spec = importlib.util.spec_from_file_location('apppushmsg_test', ROOT / 'plugins.v3/apppushmsg/__init__.py')
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, modules):
@@ -66,7 +80,8 @@ class PushTests(unittest.TestCase):
         self.plugin.init_plugin({'enabled': True, 'token': 'test', 'message_types': []})
         self.send(type=MessageType.Download)
         self.plugin._send_message.assert_not_called()
-        self.assertEqual(self.plugin.run_once()['code'], 0)
+        result = self.plugin.run_once()
+        self.assertTrue(result.success)
         self.plugin._send_message.assert_called_once()
 
     def test_channel_and_disabled(self):
@@ -94,6 +109,22 @@ class PushTests(unittest.TestCase):
     def test_early_v3_import(self):
         cls = load_plugin(legacy=True)
         self.assertEqual(cls._default_message_types(), [x.value for x in MessageType])
+
+    def test_push_url_validation(self):
+        for url in ('ftp://example.com/x', 'http://localhost/x', 'http://127.0.0.1/x',
+                    'http://10.0.0.8/x', 'http://192.168.1.2/x', 'http://169.254.0.1/x',
+                    'http://[::1]/x', 'http://0.0.0.0/x'):
+            with self.assertRaises(ValueError, msg=url):
+                self.cls._validate_push_url(url)
+        for url in ('https://api.example.com/push', 'http://106.14.89.6/api/push'):
+            self.assertEqual(self.cls._validate_push_url(url), url)
+
+    def test_default_api_key_is_public_default(self):
+        # 默认 Key 是公开值：服务端轮换 PUSH_API_KEY 即可批量失效沿用默认值的客户端。
+        self.assertTrue(self.cls.DEFAULT_API_KEY.startswith('mp_push_'))
+        self.assertEqual(self.plugin._api_key, self.cls.DEFAULT_API_KEY)
+        self.plugin.init_plugin({'enabled': True, 'token': 't', 'apikey': 'custom-key'})
+        self.assertEqual(self.plugin._api_key, 'custom-key')
 
 
 if __name__ == '__main__':

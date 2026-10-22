@@ -3,12 +3,13 @@
     "name": "APPLitePush",
     "description": "使用 APPLitePush 推送消息，支持按消息类型选择接收，默认全部推送。",
     "labels": "消息通知",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "icon": "Pushplus_A.png",
     "author": "altman",
     "level": 1,
     "release": true,
     "history": {
+      "v3.0.1": "按官方 v3 规范整理：改用 app.sdk.plugin 基类入口，测试接口改走登录态并返回统一响应模型，推送地址增加协议与内网校验，补齐日志与文档注释。",
       "v3.0.0": "适配 MoviePilot v3 SDK，动态消息类型筛选，兼容旧版选择，默认全部推送。"
     },
     "system_version": ">=3.0.0"

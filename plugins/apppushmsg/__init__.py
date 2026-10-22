@@ -10,6 +10,7 @@ from app.utils.http import RequestUtils
 
 
 class AppPushMsg(_PluginBase):
+    # 公开的默认 Key：服务端轮换 PUSH_API_KEY 即可一次性让所有沿用默认值的客户端失效。
     DEFAULT_API_KEY = "mp_push_3f8d1c7a9b4e2f6c0a5d8e1b7c9f2a4d6e3b1c8f5a7d9e2"
     MESSAGE_TYPE_OPTIONS = [
         {"type": "资源下载", "action": "all"},
@@ -19,6 +20,7 @@ class AppPushMsg(_PluginBase):
         {"type": "媒体服务器", "action": "admin"},
         {"type": "手动处理", "action": "admin"},
         {"type": "插件", "action": "admin"},
+        {"type": "智能体", "action": "admin"},
         {"type": "其它", "action": "admin"}
     ]
 
@@ -29,7 +31,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.1.8"
+    plugin_version = "1.1.9"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
