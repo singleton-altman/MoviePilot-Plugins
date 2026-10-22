@@ -5,6 +5,7 @@
 """
 
 import ipaddress
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -37,6 +38,12 @@ class AppPushMsg(_PluginBase):
         "其它": "Other",
     }
 
+    # 同一通知被宿主多次投递时的去重窗口（秒）。宿主按 user,admin 路由时
+    # 会在同一轮循环内连续投递，窗口只需覆盖这种近乎同时的重复。
+    DEDUP_WINDOW_SECONDS = 3.0
+    # 去重记录上限，超过后按窗口清理。
+    DEDUP_MAX_ENTRIES = 256
+
     # 插件名称
     plugin_name = "APPLitePush"
     # 插件描述
@@ -44,7 +51,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "3.0.1"
+    plugin_version = "3.0.2"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -59,6 +66,8 @@ class AppPushMsg(_PluginBase):
     _enabled = False
     _token = None
     _message_types = None
+    # 最近一次投递的内容指纹与时间，用于识别宿主的重复投递。
+    _recent_deliveries: dict[tuple[str, str, str], float] = {}
 
     _api_url = "http://106.14.89.6/api/push"
     _api_key = DEFAULT_API_KEY
@@ -69,6 +78,8 @@ class AppPushMsg(_PluginBase):
         self._enabled = bool(config.get("enabled", False))
         self._token = config.get("token")
         self._api_key = config.get("apikey") or self.DEFAULT_API_KEY
+        # 去重状态属于本次运行实例，重复初始化时重置。
+        self._recent_deliveries = {}
         self._message_types = self._normalize_message_types(
             config.get("message_types")
         )
@@ -336,7 +347,10 @@ class AppPushMsg(_PluginBase):
             return
 
         msg_body = event.event_data
-        if msg_body.get("channel"):
+        channel = msg_body.get("channel")
+        if channel:
+            # 显式指定渠道的消息由该渠道自行投递，避免重复推送。
+            logger.debug(f"App Push跳过指定渠道的消息：{channel}")
             return
 
         if not self._is_message_type_allowed(msg_body):
@@ -349,12 +363,42 @@ class AppPushMsg(_PluginBase):
             logger.warning("标题和内容不能同时为空")
             return
 
+        # 宿主按 user,admin 路由时，同一通知会产生多条投递事件；这里按内容去重，
+        # 避免同一条消息被重复推送到同一台设备。
+        if self._is_duplicate_delivery(msg_body, title, content):
+            logger.info("App Push跳过重复投递的通知")
+            return
+
         success, message = self._send_message(title=title, content=content)
         if success:
             logger.info("App Push消息发送成功")
         else:
             logger.warning(f"App Push消息发送失败：{message}")
         self._save_test_result(success=success, message=message)
+
+    def _is_duplicate_delivery(
+        self, msg_body: dict[str, Any], title: str, content: str
+    ) -> bool:
+        """判断同一通知的重复投递，保留时间窗口内首次出现的那条。"""
+        key = (
+            str(title),
+            str(content),
+            str(msg_body.get("type") or msg_body.get("mtype") or ""),
+        )
+        now = time.monotonic()
+        window = self.DEDUP_WINDOW_SECONDS
+        last_seen = self._recent_deliveries.get(key)
+        if last_seen is not None and now - last_seen < window:
+            return True
+        self._recent_deliveries[key] = now
+        # 清理过期记录，避免长期运行后字典无界增长。
+        if len(self._recent_deliveries) > self.DEDUP_MAX_ENTRIES:
+            self._recent_deliveries = {
+                item: seen
+                for item, seen in self._recent_deliveries.items()
+                if now - seen < window
+            }
+        return False
 
     @staticmethod
     def _build_message(msg_body: dict[str, Any]) -> tuple[str, str]:
@@ -566,3 +610,4 @@ class AppPushMsg(_PluginBase):
     def stop_service(self) -> None:
         """释放插件状态；本插件不持有后台线程或网络客户端。"""
         self._enabled = False
+        self._recent_deliveries = {}

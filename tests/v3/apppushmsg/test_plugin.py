@@ -58,6 +58,8 @@ class PushTests(unittest.TestCase):
         self.plugin.init_plugin({'enabled': True, 'token': 'test'})
 
     def send(self, **body):
+        # 每个用例只验证过滤语义，不受同内容去重影响。
+        self.plugin._recent_deliveries = {}
         self.plugin.send(SimpleNamespace(event_data={'title': 'hello', **body}))
 
     def test_default_all_including_unknown_and_missing(self):
@@ -90,6 +92,31 @@ class PushTests(unittest.TestCase):
         self.assertFalse(self.plugin.get_state())
         self.send()
         self.plugin._send_message.assert_not_called()
+
+    def test_duplicate_delivery_is_collapsed(self):
+        # 宿主按 user,admin 路由时会在同一轮内投递两次相同通知。
+        body = {'title': '同一通知', 'text': '正文', 'type': MessageType.Subscribe}
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        self.assertEqual(self.plugin._send_message.call_count, 1)
+        # 不同内容不应被误判为重复。
+        self.plugin.send(SimpleNamespace(event_data={**body, 'text': '另一条'}))
+        self.assertEqual(self.plugin._send_message.call_count, 2)
+
+    def test_duplicate_window_expires(self):
+        body = {'title': '窗口', 'text': '正文', 'type': MessageType.Subscribe}
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        key = ('窗口', '正文', str(MessageType.Subscribe))
+        self.plugin._recent_deliveries[key] -= self.cls.DEDUP_WINDOW_SECONDS + 1
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        self.assertEqual(self.plugin._send_message.call_count, 2)
+
+    def test_dedup_state_reset_on_init(self):
+        body = {'title': '重置', 'text': '正文', 'type': MessageType.Subscribe}
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        self.plugin.init_plugin({'enabled': True, 'token': 'test'})
+        self.plugin.send(SimpleNamespace(event_data=dict(body)))
+        self.assertEqual(self.plugin._send_message.call_count, 2)
 
     def test_config_compatibility(self):
         for value in ['站点', 'SiteMessage', MessageType.SiteMessage, {'value': 'SiteMessage'}]:
