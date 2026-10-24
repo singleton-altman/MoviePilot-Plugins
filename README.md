@@ -29,9 +29,16 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/si
 ## MoviePilot v3
 
 - v3 插件目录：`plugins.v3/apppushmsg`
-- v3 市场清单：`package.v3.json`，要求 MoviePilot `>=3.0.0`。
+- v3 市场清单：`package.v3.json`，要求 MoviePilot `>=3.0.3`（该版本起才提供 `app.sdk.plugin` 基类入口）。
 - 插件市场地址与上文相同，v3 宿主读取对应版本的插件。
 - 保存 token、API Key 并启用插件后生效；测试按钮使用已保存的配置。
+- 测试失败时会透出中继或宿主返回的具体原因，例如宿主未注册插件接口时的 `HTTP 404: Not Found`。
+
+### 版本兼容
+
+插件与 APPLitePush 中继服务之间没有版本协商，兼容性只依赖推送接口的三个必填字段（`token`、`title`、`content`）和 `X-API-Key` 请求头，中继会忽略其它未知字段。因此插件更新不需要中继同步升级；反过来，中继收紧认证或字段要求时，请先确认旧插件版本仍能工作。
+
+测试按钮请求的是宿主自身的插件接口，返回 404 表示宿主没有注册该插件的动态路由（通常是插件未加载或插件标识不符），而不是中继不可达。
 
 ### 消息类型选择
 

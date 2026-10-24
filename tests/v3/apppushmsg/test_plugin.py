@@ -131,7 +131,7 @@ class PushTests(unittest.TestCase):
         self.assertIn('智能体', json.dumps(form, ensure_ascii=False))
         manifest = json.loads((ROOT / 'package.v3.json').read_text())['AppPushMsg']
         self.assertEqual(manifest['version'], self.plugin.plugin_version)
-        self.assertEqual(manifest['system_version'], '>=3.0.0')
+        self.assertEqual(manifest['system_version'], '>=3.0.3')
 
     def test_early_v3_import(self):
         cls = load_plugin(legacy=True)
@@ -145,6 +145,28 @@ class PushTests(unittest.TestCase):
                 self.cls._validate_push_url(url)
         for url in ('https://api.example.com/push', 'http://106.14.89.6/api/push'):
             self.assertEqual(self.cls._validate_push_url(url), url)
+
+    def test_failed_push_surfaces_server_reason(self):
+        # 宿主插件路由缺失时返回 {"success": false, "message": "Not Found"}，
+        # 只显示状态码会让用户误以为中继不可用。
+        response = Mock(status_code=404, reason='Not Found')
+        response.json.return_value = {'success': False, 'message': 'Not Found'}
+        request_utils = Mock()
+        request_utils.return_value.post_res.return_value = response
+        with patch.dict(self.cls._send_message.__globals__, {'RequestUtils': request_utils}):
+            success, message = self.cls._send_message(self.plugin, '标题', '正文')
+        self.assertFalse(success)
+        self.assertEqual(message, 'HTTP 404: Not Found')
+
+    def test_failed_push_without_json_body_falls_back_to_reason(self):
+        response = Mock(status_code=502, reason='Bad Gateway')
+        response.json.side_effect = ValueError('not json')
+        request_utils = Mock()
+        request_utils.return_value.post_res.return_value = response
+        with patch.dict(self.cls._send_message.__globals__, {'RequestUtils': request_utils}):
+            success, message = self.cls._send_message(self.plugin, '标题', '正文')
+        self.assertFalse(success)
+        self.assertEqual(message, 'HTTP 502: Bad Gateway')
 
     def test_default_api_key_is_public_default(self):
         # 默认 Key 是公开值：服务端轮换 PUSH_API_KEY 即可批量失效沿用默认值的客户端。

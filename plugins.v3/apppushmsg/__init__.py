@@ -51,7 +51,7 @@ class AppPushMsg(_PluginBase):
     # 插件图标
     plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "3.0.2"
+    plugin_version = "3.0.3"
     # 插件作者
     plugin_author = "altman"
     # 作者主页
@@ -580,10 +580,25 @@ class AppPushMsg(_PluginBase):
 
                 return True, "消息发送成功"
 
-            return False, f"HTTP {res.status_code}: {res.reason}"
+            detail = self._extract_error_detail(res)
+            return False, f"HTTP {res.status_code}: {detail}"
         except Exception as err:
             logger.error(f"App Push消息发送失败：{err}")
             return False, str(err)
+
+    @staticmethod
+    def _extract_error_detail(res: Any) -> str:
+        """从中继或宿主的失败响应里取可读原因，取不到时退回 HTTP 状态描述。"""
+        try:
+            body = res.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            for key in ("message", "msg", "detail", "error"):
+                value = body.get(key)
+                if value:
+                    return str(value)
+        return str(res.reason or "请求失败")
 
     def _save_test_result(self, success: bool, message: str) -> None:
         """保存最近一次推送结果，供详情页展示。"""
